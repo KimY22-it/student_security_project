@@ -1,8 +1,8 @@
 from connect_db import get_connection
 
 def login():
-    username = input("Nhập username: ")
-    password = input("Nhập password: ")
+    username = input("Nhập username: ").strip()
+    password = input("Nhập password: ").strip()
 
     conn = get_connection()
     if conn is None:

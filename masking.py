@@ -9,9 +9,9 @@ def mask_phone(phone):
     return phone[:3] + (len(phone) - 5) * '*' + phone[-2:]
 
 def mask_cccd(cccd):
-    return cccd[:3] + (len(cccd) - 5) * '*' + cccd[-2:]
+    return cccd[:3] + (len(cccd) - 3) * '*'
 
 def mask_address(address):
-    if len(address) <= 6:
-        return len(address) * '*'
-    return address[:6] + (len(address) - 6) * '*'
+    at_index =  address.find(' ')
+    return address[:at_index] + (len(address) - at_index) * '*'
+    

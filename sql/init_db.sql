@@ -1,9 +1,10 @@
+
 CREATE DATABASE student_db;
 USE student_db;
 CREATE TABLE accounts (
 	id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL,
     role ENUM('admin', 'user') NOT NULL DEFAULT 'user'
 );
 
@@ -19,7 +20,7 @@ CREATE TABLE students (
     create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO accounts (username, password_hash, role)
+INSERT INTO accounts (username, password, role)
 VALUES
 ('admin1', '123456', 'admin'),
 ('user1', '123456', 'user');

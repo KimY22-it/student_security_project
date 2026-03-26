@@ -1,3 +1,4 @@
+
 CREATE DATABASE student_db;
 USE student_db;
 CREATE TABLE accounts (
@@ -19,7 +20,7 @@ CREATE TABLE students (
     create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO accounts (username, password_hash, role)
+INSERT INTO accounts (username, password, role)
 VALUES
 ('admin1', '123456', 'admin'),
 ('user1', '123456', 'user');

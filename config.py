@@ -1,7 +1,12 @@
+import os
+from dotenv import load_dotenv
+
+
+load_dotenv()
 DB_CONFIG = {
-    "host": "localhost",
-    "user": "root",
-    "password": "1234",
-    "database": "student_db"
+    "host": os.getenv("DB_HOST"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "database": os.getenv("DB_NAME")
 }
-APP_SECRET_KEY = "abcdefghaes12345"
+APP_SECRET_KEY = os.getenv("KEY")

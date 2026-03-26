@@ -102,7 +102,6 @@ def input_address():
     while(len(address) == 0):
         print("Địa chỉ không được để trống. Vui lòng nhập lại.")
         address = input("Nhập địa chỉ: ").strip()
-        address = input("Nhập địa chỉ: ").strip()
     return address
 
 
@@ -126,8 +125,8 @@ def input_full_name():
 
 
 def input_class_name():
-    class_name = input("Nhập lớp: ")
-    while(len(class_name.strip()) == 0):
+    class_name = input("Nhập lớp: ").strip()
+    while(len(class_name) == 0):
         print("Lớp không được để trống. Vui lòng nhập lại.")
         class_name = input("Nhập lớp: ").strip()
     return class_name
@@ -218,7 +217,7 @@ def get_students_full():
     sql = """
         SELECT student_code, full_name, class_name, email, phone, cccd, address, create_at
         FROM students
-        ORDER BY id DESC
+        ORDER BY id ASC
     """
 
     try:
@@ -247,7 +246,7 @@ def get_students_masked():
     sql = """
         SELECT student_code, full_name, class_name, email, phone, cccd, address, create_at
         FROM students
-        ORDER BY id DESC
+        ORDER BY id ASC
     """
 
     try:
@@ -263,7 +262,7 @@ def get_students_masked():
 
 
 def display_student(student):
-    print("\n" + "*" * 20)
+    print("*" * 20)
     print(f"Mã sinh viên: {student['student_code']}")
     print(f"Họ tên: {student['full_name']}")
     print(f"Lớp: {student['class_name']}")

@@ -10,6 +10,10 @@
    pip install mysql-connector-python
 6. Chạy chương trình:
    python main.py
+7. Cài thư viện Customtkinter:
+   pip install customtkinter
+8. Chạy giao diện:
+   python gui.py
 
 ## Tài khoản mẫu
 

@@ -1,5 +1,5 @@
 from connect_db import get_connection
-from masking import mask_email, mask_phone, mask_cccd, mask_address
+from masking import mask_email, mask_phone, mask_cccd
 from encryption import encrypt, decrypt
 
 
@@ -47,7 +47,6 @@ def get_students_for_display(role):
             email = decrypt(row[3])
             phone = decrypt(row[4])
             cccd = decrypt(row[5])
-            address = decrypt(row[6])
         except Exception as e:
             print(f"Lỗi khi giải mã dữ liệu sinh viên: {e}")
             continue
@@ -56,7 +55,6 @@ def get_students_for_display(role):
             email = mask_email(email)
             phone = mask_phone(phone)
             cccd = mask_cccd(cccd)
-            address = mask_address(address)
 
         student = {
             "student_code": row[0],
@@ -65,7 +63,7 @@ def get_students_for_display(role):
             "email": email,
             "phone": phone,
             "cccd": cccd,
-            "address": address
+            "address": row[6]
         }
         students.append(student)
 
@@ -78,7 +76,7 @@ def add_student_data(student_code, full_name, class_name, email, phone, cccd, ad
     email = email
     phone = phone
     cccd = cccd
-    address = address
+    address = address.strip()
 
     if is_student_code_exists(student_code):
         return False, "Mã sinh viên đã tồn tại."

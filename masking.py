@@ -10,8 +10,3 @@ def mask_phone(phone):
 
 def mask_cccd(cccd):
     return cccd[:3] + (len(cccd) - 3) * '*'
-
-def mask_address(address):
-    at_index =  address.find(' ')
-    return address[:at_index] + (len(address) - at_index) * '*'
-    

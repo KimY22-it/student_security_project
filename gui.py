@@ -1,12 +1,6 @@
-
 import customtkinter as ctk
 from tkinter import messagebox, ttk
-from auth import check_login
-from student_manager import (
-    get_students_for_display,
-    add_student_data,
-    delete_student_by_code
-)
+from client_api import login, get_students, add_student, delete_student
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -111,24 +105,23 @@ class AddStudentDialog(ctk.CTkToplevel):
         return entry
 
     def handle_save(self):
-        success, message = add_student_data(
-            self.student_code.get(),
-            self.full_name.get(),
-            self.class_name.get(),
-            self.email.get(),
-            self.phone.get(),
-            self.cccd.get(),
-            self.address.get()
-        )
+        response = add_student({
+            "student_code": self.student_code.get(),
+            "full_name": self.full_name.get(),
+            "class_name": self.class_name.get(),
+            "email": self.email.get(),
+            "phone": self.phone.get(),
+            "cccd": self.cccd.get(),
+            "address": self.address.get()
+        })
 
-        if success:
-            messagebox.showinfo("Thông báo", message)
+        if response["success"]:
+            messagebox.showinfo("Thông báo", response["message"])
             if self.on_success:
                 self.on_success()
             self.destroy()
         else:
-            messagebox.showerror("Lỗi", message)
-
+            messagebox.showerror("Lỗi", response["message"])
 
 class DeleteStudentDialog(ctk.CTkToplevel):
     def __init__(self, parent, on_success=None):
@@ -195,15 +188,15 @@ class DeleteStudentDialog(ctk.CTkToplevel):
             messagebox.showwarning("Cảnh báo", "Vui lòng nhập mã sinh viên.")
             return
 
-        success, message = delete_student_by_code(code)
-        if success:
-            messagebox.showinfo("Thông báo", message)
+        response = delete_student(code)
+
+        if response["success"]:
+            messagebox.showinfo("Thông báo", response["message"])
             if self.on_success:
                 self.on_success()
             self.destroy()
         else:
-            messagebox.showerror("Lỗi", message)
-
+            messagebox.showerror("Lỗi", response["message"])
 
 class App(ctk.CTk):
     def __init__(self):
@@ -296,13 +289,6 @@ class App(ctk.CTk):
         )
         login_btn.place(relx=0.5, y=315, anchor="center")
 
-        ctk.CTkLabel(
-            card,
-            text="Tài khoản mẫu: admin1 / 123456 | user1 / 123456",
-            font=ctk.CTkFont(size=12),
-            text_color=SUBTEXT
-        ).place(relx=0.5, y=385, anchor="center")
-
         self.username_entry.bind("<Return>", lambda event: self.handle_login())
         self.password_entry.bind("<Return>", lambda event: self.handle_login())
 
@@ -324,14 +310,16 @@ class App(ctk.CTk):
             messagebox.showwarning("Cảnh báo", "Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu.")
             return
 
-        user = check_login(username, password)
-        if user is None:
-            messagebox.showerror("Lỗi", "Sai tài khoản hoặc mật khẩu.")
+        response = login(username, password)
+
+        if not response["success"]:
+            messagebox.showerror("Lỗi", response["message"])
             return
 
-        self.current_user = user
+        self.current_user = response["user"]
         self.build_dashboard()
 
+    
     # ---------------- DASHBOARD ----------------
     def build_dashboard(self):
         self.clear_window()
@@ -444,18 +432,6 @@ class App(ctk.CTk):
         )
         search_btn.pack(side="right", padx=6)
 
-        refresh_btn = ctk.CTkButton(
-            header_frame,
-            text="Làm mới",
-            width=100,
-            height=40,
-            corner_radius=12,
-            fg_color=SECONDARY,
-            hover_color=SECONDARY_HOVER,
-            command=self.load_students_into_table
-        )
-        refresh_btn.pack(side="right", padx=6)
-
         table_wrapper = ctk.CTkFrame(self.content_card, fg_color="transparent")
         table_wrapper.pack(fill="both", expand=True, padx=18, pady=(0, 18))
 
@@ -474,7 +450,7 @@ class App(ctk.CTk):
             font=("Segoe UI", 10, "bold")
         )
 
-        columns = ("student_code", "full_name", "class_name", "email", "phone", "cccd", "address", "create_at")
+        columns = ("student_code", "full_name", "class_name", "email", "phone", "cccd", "address")
         self.tree = ttk.Treeview(table_wrapper, columns=columns, show="headings")
 
         self.tree.heading("student_code", text="Mã SV")
@@ -484,7 +460,6 @@ class App(ctk.CTk):
         self.tree.heading("phone", text="SĐT")
         self.tree.heading("cccd", text="CCCD")
         self.tree.heading("address", text="Địa chỉ")
-        self.tree.heading("create_at", text="Ngày tạo")
 
         self.tree.column("student_code", width=90, anchor="center")
         self.tree.column("full_name", width=150)
@@ -493,7 +468,6 @@ class App(ctk.CTk):
         self.tree.column("phone", width=110, anchor="center")
         self.tree.column("cccd", width=130, anchor="center")
         self.tree.column("address", width=230)
-        self.tree.column("create_at", width=140, anchor="center")
 
         scrollbar = ttk.Scrollbar(table_wrapper, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -502,8 +476,13 @@ class App(ctk.CTk):
         scrollbar.pack(side="right", fill="y")
 
     def load_students_into_table(self):
-        self.students_cache = get_students_for_display(self.current_user["role"])
-        self.render_students(self.students_cache)
+        response = get_students(self.current_user["role"])
+
+        if response["success"]:
+            self.students_cache = response["students"]
+            self.render_students(self.students_cache)
+        else:
+            messagebox.showerror("Lỗi", response["message"])
 
     def render_students(self, students):
         for item in self.tree.get_children():
@@ -517,8 +496,7 @@ class App(ctk.CTk):
                 student["email"],
                 student["phone"],
                 student["cccd"],
-                student["address"],
-                student["create_at"]
+                student["address"]
             ))
 
     def search_students(self):

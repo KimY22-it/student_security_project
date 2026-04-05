@@ -1,26 +1,27 @@
 
-CREATE DATABASE student_db;
-USE student_db;
+CREATE DATABASE IF NOT EXISTS information_manager_db;
+USE information_manager_db;
+
 CREATE TABLE accounts (
-	id INT AUTO_INCREMENT PRIMARY KEY,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    role ENUM('admin', 'user') NOT NULL DEFAULT 'user'
+    password_hash VARCHAR(255) NOT NULL,
+    salt VARCHAR(255) NOT NULL,
+    data_key_user_encrypt TEXT,
+    role VARCHAR(20) NOT NULL
 );
 
-CREATE TABLE students (
-	id INT AUTO_INCREMENT PRIMARY KEY,
-    student_code VARCHAR(20) NOT NULL UNIQUE,
-    full_name VARCHAR(100) NOT NULL,
-    class_name VARCHAR(20) NOT NULL,
-    email VARCHAR(255) NOT NULL,
-    phone VARCHAR(255) NOT NULL,
-    cccd VARCHAR(255) NOT NULL,
-    address VARCHAR(500) NOT NULL,
-    create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE personal_information (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    account_id INT NOT NULL UNIQUE,
+    fullname VARCHAR(100) NOT NULL,
+    gender VARCHAR(10),
+    email_encrypt TEXT,
+    cccd_encrypt TEXT,
+    phone_encrypt TEXT,
+    
+    CONSTRAINT fk_information_account
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
-
-INSERT INTO accounts (username, password, role)
-VALUES
-('admin1', '123456', 'admin'),
-('user1', '123456', 'user');

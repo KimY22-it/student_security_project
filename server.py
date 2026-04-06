@@ -1,17 +1,41 @@
 import socket
 import json
-from auth import check_login
-from student_manager import (
-    get_students_for_display,
-    add_student_data,
-    delete_student_by_code
-)
+import secrets
+from auth import check_login, register_user
+from personal_info_manager import get_personal_info, get_all_personal_info
+from dh import dh_handshake_server, send_frame, recv_frame, channel_encrypt, channel_decrypt
 
 HOST = "127.0.0.1"
 PORT = 5000
 
+CLIENT_TIMEOUT = 10
+SERVER_ACCEPT_TIMEOUT = 2
 
-def handle_request(payload):
+ACTIVE_SESSIONS = {}
+
+def _create_session(user: dict) -> str:
+    session_token = secrets.token_hex(32)
+    ACTIVE_SESSIONS[session_token] = {
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "data_key": user.get("data_key"),
+    }
+    return session_token
+
+
+
+def _get_session(payload: dict):
+    session_token = payload.get("session_token", "")
+    if not session_token:
+        return None
+    return ACTIVE_SESSIONS.get(session_token)
+
+
+
+
+def handle_request(payload: dict) -> dict:
+    """Xử lý payload (đã giải mã), trả về response dict."""
     action = payload.get("action")
 
     if action == "login":
@@ -22,57 +46,115 @@ def handle_request(payload):
         if user is None:
             return {"success": False, "message": "Sai tài khoản hoặc mật khẩu."}
 
-        return {"success": True, "user": user}
+        session_token = _create_session(user)
+        return {
+            "success": True,
+            "user": {
+                "username": user["username"],
+                "role": user["role"],
+            },
+            "session_token": session_token,
+        }
 
-    elif action == "get_students":
-        role = payload.get("role", "user")
-        students = get_students_for_display(role)
-        return {"success": True, "students": students}
 
-    elif action == "add_student":
+    elif action == "register":
         data = payload.get("data", {})
-
-        success, message = add_student_data(
-            data.get("student_code", ""),
-            data.get("full_name", ""),
-            data.get("class_name", ""),
-            data.get("email", ""),
-            data.get("phone", ""),
-            data.get("cccd", ""),
-            data.get("address", "")
+        success, message = register_user(
+            username=data.get("username", ""),
+            password=data.get("password", ""),
+            fullname=data.get("fullname", ""),
+            gender=data.get("gender", ""),
+            email=data.get("email", ""),
+            cccd=data.get("cccd", ""),
+            phone=data.get("phone", ""),
         )
-
         return {"success": success, "message": message}
 
-    elif action == "delete_student":
-        code = payload.get("student_code", "")
-        success, message = delete_student_by_code(code)
-        return {"success": success, "message": message}
+    elif action == "get_my_info":
+        session = _get_session(payload)
+        
+        if session is None:
+            return {"success": False, "message": "Phiên đăng nhập không hợp lệ hoặc đã hết hạn."}
+        if session["role"] != "user":
+            return {"success": False, "message": "Chỉ user thường mới được xem thông tin cá nhân."}
+
+        if not session.get("data_key"):
+            return {"success": False, "message": "Không tìm thấy khóa dữ liệu của phiên hiện tại."}
+        
+        info = get_personal_info(session["id"], session["data_key"])
+        if info:
+            return {"success": True, "info": info}
+        return {"success": False, "message": "Không tìm thấy thông tin hoặc giải mã thất bại."}
+        
+    elif action == "get_all_info":
+        session = _get_session(payload)
+        if session is None:
+            return {"success": False, "message": "Phiên đăng nhập không hợp lệ hoặc đã hết hạn."}
+        if session["role"] != "admin":
+            return {"success": False, "message": "Chỉ admin mới được xem thông tin cá nhân."}
+        info_list = get_all_personal_info()
+        return {"success": True, "info_list": info_list}
+    elif action == "logout":
+        session_token = payload.get("session_token", "")
+        if session_token in ACTIVE_SESSIONS:
+            del ACTIVE_SESSIONS[session_token]
+            return {"success": True, "message": "Đăng xuất thành công."}
+        return {"success": False, "message": "Phiên đăng nhập không hợp lệ hoặc đã hết hạn."}
 
     return {"success": False, "message": "Yêu cầu không hợp lệ."}
 
 
-def start_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
-    server.listen(5)
+def handle_connection(conn, addr):
+    """Xử lý 1 kết nối: DH handshake → nhận request mã hóa → gửi response mã hóa."""
+    print(f"Kết nối từ: {addr}")
+    conn.settimeout(CLIENT_TIMEOUT)
+    try:
+        # 1. DH Handshake – thiết lập session_key
+        session_key = dh_handshake_server(conn)
 
-    print(f"Server đang chạy tại {HOST}:{PORT}")
+        # 2. Nhận payload đã mã hóa
+        encrypted_payload = recv_frame(conn)
 
-    while True:
-        conn, addr = server.accept()
-        print("Đã kết nối từ:", addr)
+        # 3. Giải mã
+        plaintext = channel_decrypt(session_key, encrypted_payload)
+        payload   = json.loads(plaintext.decode("utf-8"))
 
-        data = conn.recv(65536).decode("utf-8")
-        if not data:
-            conn.close()
-            continue
-
-        payload = json.loads(data)
+        # 4. Xử lý logic
         response = handle_request(payload)
 
-        conn.sendall(json.dumps(response, ensure_ascii=False).encode("utf-8"))
+        # 5. Mã hóa response và gửi về
+        response_bytes     = json.dumps(response, ensure_ascii=False).encode("utf-8")
+        encrypted_response = channel_encrypt(session_key, response_bytes)
+        send_frame(conn, encrypted_response)
+
+    except socket.timeout:
+        print(f"  [Lỗi] {addr}: Client phản hồi chậm bị timeout.")
+    except Exception as e:
+        print(f"  [Lỗi] {addr}: {e}")
+    finally:
         conn.close()
+
+
+def start_server():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((HOST, PORT))
+    server.listen(5)
+    server.settimeout(SERVER_ACCEPT_TIMEOUT)
+    print(f"Server đang chạy tại {HOST}:{PORT} (DH-encrypted)")
+
+    while True:
+        try:
+            conn, addr = server.accept()
+            handle_connection(conn, addr)
+        except socket.timeout:
+            continue
+        except KeyboardInterrupt:
+            print("Dừng server.")
+            break
+        except Exception as e:
+            print(f"Lỗi accept: {e}")
+    server.close()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import socket
 import json
 import secrets
+import time
 from auth import check_login, register_user
 from personal_info_manager import get_personal_info, get_all_personal_info
 from dh import dh_handshake_server, send_frame, recv_frame, channel_encrypt, channel_decrypt
@@ -10,29 +11,54 @@ PORT = 5000
 
 CLIENT_TIMEOUT = 10
 SERVER_ACCEPT_TIMEOUT = 2
-
+SESSION_TIMEOUT = 10 * 60 
 ACTIVE_SESSIONS = {}
 
 def _create_session(user: dict) -> str:
     session_token = secrets.token_hex(32)
+    now = time.time()
+
     ACTIVE_SESSIONS[session_token] = {
         "id": user["id"],
         "username": user["username"],
         "role": user["role"],
         "data_key": user.get("data_key"),
+        "created_at": now,
+        "last_seen": now,
     }
     return session_token
-
 
 
 def _get_session(payload: dict):
     session_token = payload.get("session_token", "")
     if not session_token:
         return None
-    return ACTIVE_SESSIONS.get(session_token)
 
+    session = ACTIVE_SESSIONS.get(session_token)
+    if session is None:
+        return None
 
+    now = time.time()
 
+    # Hết hạn nếu không hoạt động quá lâu
+    if now - session["last_seen"] > SESSION_TIMEOUT:
+        del ACTIVE_SESSIONS[session_token]
+        return None
+
+    # Cập nhật lần hoạt động cuối
+    session["last_seen"] = now
+    return session
+
+def cleanup_expired_sessions():
+    now = time.time()
+    expired_tokens = []
+
+    for token, session in ACTIVE_SESSIONS.items():
+        if now - session["last_seen"] > SESSION_TIMEOUT:
+            expired_tokens.append(token)
+
+    for token in expired_tokens:
+        del ACTIVE_SESSIONS[token]
 
 def handle_request(payload: dict) -> dict:
     """Xử lý payload (đã giải mã), trả về response dict."""
@@ -145,9 +171,11 @@ def start_server():
 
     while True:
         try:
+            cleanup_expired_sessions()
             conn, addr = server.accept()
             handle_connection(conn, addr)
         except socket.timeout:
+            cleanup_expired_sessions()
             continue
         except KeyboardInterrupt:
             print("Dừng server.")

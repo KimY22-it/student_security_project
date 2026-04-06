@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-from config import APP_SECRET_KEY
+from hashlib import pbkdf2_hmac
+from hmac import new as new_hmac, compare_digest
+import os
 
 AES_KEY_SIZE = 16
 IV_SIZE = 16
+HMAC_KEY_SIZE = 16
+SALT_SIZE = 16
+HMAC_SIZE = 32
 BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 ENC_PREFIX = "ENC::"
@@ -289,6 +294,9 @@ def base64_char_to_val(ch):
 
 
 def base64_to_bytes(text):
+    if not isinstance(text, str):
+        text = str(text)
+
     clean = ""
     for ch in text:
         if ch != "\n" and ch != "\r" and ch != " " and ch != "\t":
@@ -332,131 +340,145 @@ def base64_to_bytes(text):
 
     return bytes(result)
 
-def bytes_to_string(data):
-    result = ""
-    for b in data:
-        result += chr(b)
-    return result
-
-def string_to_bytes(text):
-    result = []
-    for ch in text:
-        code = ord(ch)
-        if code > 255:
-            raise ValueError("Chi ho tro ky tu khong dau.")
-        result.append(code)
-    return bytes(result)
+def get_key_iv(password, salt, workload=100000):
+    stretched = pbkdf2_hmac(
+        "sha256",
+        password,
+        salt,
+        workload,
+        AES_KEY_SIZE + IV_SIZE + HMAC_KEY_SIZE
+    )
+    aes_key, stretched = stretched[:AES_KEY_SIZE], stretched[AES_KEY_SIZE:]
+    hmac_key, stretched = stretched[:HMAC_KEY_SIZE], stretched[HMAC_KEY_SIZE:]
+    iv = stretched[:IV_SIZE]
+    return aes_key, hmac_key, iv
 
 
-def normalize_secret(secret):
-    if secret is None:
-        secret = ""
-
-    if isinstance(secret, bytes):
-        text = ""
-        for b in secret:
-            text += chr(b)
-        secret = text
-
-    if not isinstance(secret, str):
-        secret = str(secret)
-
-    result = []
-    for ch in secret:
-        result.append(ord(ch) & 0xFF)
-
-    if len(result) == 0:
-        result.append(0)
-
-    return result
-
-
-def repeat_to_length(values, length):
-    result = []
-    i = 0
-
-    while len(result) < length:
-        result.append(values[i % len(values)])
-        i += 1
-
-    return bytes(result)
-
-
-def derive_key(password):
-    secret_bytes = normalize_secret(password)
-    expanded = repeat_to_length(secret_bytes, AES_KEY_SIZE)
-    return expanded[:AES_KEY_SIZE]
-
-
-_iv_counter = 0
-
-def generate_iv():
-    global _iv_counter
-    _iv_counter += 1
-
-    seed = "IV" + str(_iv_counter)
-    seed_bytes = normalize_secret(seed)
-    iv = repeat_to_length(seed_bytes, IV_SIZE)
-    return iv
-
-
-def aes_encrypt_bytes(key, plaintext):
+def aes_encrypt_bytes(key, plaintext, workload=100000):
     if isinstance(key, str):
-        key = string_to_bytes(key)
-
+        key = key.encode('utf-8')
     if isinstance(plaintext, str):
-        plaintext = string_to_bytes(plaintext)
-
-    aes_key = derive_key(key)
-    iv = generate_iv()
-
-    ciphertext = AES(aes_key).encrypt_cbc(plaintext, iv)
-    return iv + ciphertext
+        plaintext = plaintext.encode('utf-8')
 
 
-def aes_decrypt_bytes(key, encrypted_data):
+    salt = os.urandom(SALT_SIZE)
+    key, hmac_key, iv = get_key_iv(key, salt, workload)
+    ciphertext = AES(key).encrypt_cbc(plaintext, iv)
+    hmac = new_hmac(hmac_key, salt + ciphertext, "sha256").digest() #sau khi mã hóa, tạo HMAC của salt + ciphertext để đảm bảo tính toàn vẹn của dữ liệu sau đó lấy dữ liệu dạng bytes của HMAC để lưu vào biến hmac
+
+
+    assert len(hmac) == HMAC_SIZE
+    return hmac + salt + ciphertext
+
+
+def aes_decrypt_bytes(key, ciphertext, workload=100000):
+    assert len(ciphertext) % 16 == 0, "Ciphertext must be made of full 16-byte blocks."
+    assert len(ciphertext) >= AES_KEY_SIZE + HMAC_SIZE, "Ciphertext too short."
+
+
     if isinstance(key, str):
-        key = string_to_bytes(key)
-
-    if len(encrypted_data) < IV_SIZE:
-        raise ValueError("Encrypted data is invalid.")
-
-    iv = encrypted_data[:IV_SIZE]
-    ciphertext = encrypted_data[IV_SIZE:]
-
-    if len(ciphertext) % 16 != 0:
-        raise ValueError("Ciphertext must be made of full 16-byte blocks.")
-
-    aes_key = derive_key(key)
-    return AES(aes_key).decrypt_cbc(ciphertext, iv)
+        key = key.encode('utf-8')
 
 
-def encrypt(text):
+    hmac, ciphertext = ciphertext[:HMAC_SIZE], ciphertext[HMAC_SIZE:]
+    salt, ciphertext = ciphertext[:SALT_SIZE], ciphertext[SALT_SIZE:]
+    key, hmac_key, iv = get_key_iv(key, salt, workload)
+
+
+    expected_hmac = new_hmac(hmac_key, salt + ciphertext, "sha256").digest()
+    assert compare_digest(hmac, expected_hmac), "Ciphertext corrupted or tampered."
+
+
+    return AES(key).decrypt_cbc(ciphertext, iv)
+
+
+def encrypt(text, key):
+    """
+    Hàm dùng trong project:
+    - input: chuỗi thường
+    - output: chuỗi base64 có prefix ENC:: để lưu DB
+    """
     if text is None:
         return None
+
 
     if not isinstance(text, str):
         text = str(text)
 
-    encrypted_bytes = aes_encrypt_bytes(APP_SECRET_KEY, text)
+
+    encrypted_bytes = aes_encrypt_bytes(key, text)
     encoded = bytes_to_base64(encrypted_bytes)
     return ENC_PREFIX + encoded
 
 
-def decrypt(text):
+def decrypt(text, key):
+    """
+    Hàm dùng trong project:
+    - nếu dữ liệu có prefix ENC:: -> giải mã
+    - nếu không có -> trả nguyên để tương thích dữ liệu cũ
+    """
     if text is None:
         return None
+
 
     if not isinstance(text, str):
         text = str(text)
 
+
     if not text.startswith(ENC_PREFIX):
         return text
 
-    try:
-        encoded = text[len(ENC_PREFIX):]
-        encrypted_bytes = base64_to_bytes(encoded)
-        plain_bytes = aes_decrypt_bytes(APP_SECRET_KEY, encrypted_bytes)
-        return bytes_to_string(plain_bytes)
-    except Exception:
-        return text
+
+    encoded = text[len(ENC_PREFIX):]
+    encrypted_bytes = base64_to_bytes(encoded)
+    plain_bytes = aes_decrypt_bytes(key, encrypted_bytes)
+    return plain_bytes.decode('utf-8')
+
+
+# ──────────────────────────────────────────────────────────────
+#  Data Key Management – Password-Based Key Wrapping
+# ──────────────────────────────────────────────────────────────
+
+def generate_data_key() -> bytes:
+    return os.urandom(AES_KEY_SIZE)
+
+
+def derive_wrapping_key(password: str, salt_hex: str) -> bytes:
+    """
+    Dẫn xuất wrapping_key từ password và salt của user qua PBKDF2-HMAC-SHA256.
+    - password: mật khẩu plaintext của user
+    - salt_hex : chuỗi hex của salt (cùng salt dùng để hash mật khẩu)
+    Trả về 16 bytes đầu của output PBKDF2 làm wrapping_key.
+    wrapping_key KHÔNG được lưu vào DB – chỉ tồn tại trong RAM.
+    """
+    password_bytes = password.encode("utf-8")
+    salt_bytes = bytes.fromhex(salt_hex)
+    stretched = pbkdf2_hmac(
+        "sha256",
+        password_bytes,
+        salt_bytes,
+        100000,
+        AES_KEY_SIZE + IV_SIZE + HMAC_KEY_SIZE
+    )
+    return stretched[:AES_KEY_SIZE]
+
+
+def encrypt_data_key(data_key: bytes, wrapping_key: bytes) -> str:
+    """
+    Mã hóa data_key bằng wrapping_key (AES-CBC + HMAC).
+    Trả về chuỗi base64 có prefix ENC:: để lưu vào DB.
+    """
+    encrypted_bytes = aes_encrypt_bytes(wrapping_key, data_key)
+    return ENC_PREFIX + bytes_to_base64(encrypted_bytes)
+
+
+def decrypt_data_key(encrypted_key_str: str, wrapping_key: bytes) -> bytes:
+    """
+    Giải mã data_key từ chuỗi base64 lưu trong DB.
+    Trả về data_key dạng bytes gốc.
+    """
+    if not encrypted_key_str.startswith(ENC_PREFIX):
+        raise ValueError("data_key_user_encrypt không hợp lệ: thiếu prefix ENC::")
+    encoded = encrypted_key_str[len(ENC_PREFIX):]
+    encrypted_bytes = base64_to_bytes(encoded)
+    return aes_decrypt_bytes(wrapping_key, encrypted_bytes)
